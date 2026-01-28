@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>廣東話語音轉文字</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🎙️ 廣東話語音轉文字</h1>
+            <p class="subtitle">上傳 MP3 錄音，即時轉換成文字</p>
+        </header>
+
+        <main>
+            <!-- 上傳區域 -->
+            <div class="upload-zone" id="uploadZone">
+                <div class="upload-icon">📁</div>
+                <p class="upload-text">拖拽音檔到這裡，或點擊選擇檔案</p>
+                <p class="upload-hint">支援格式：MP3, WAV, M4A, OGG, FLAC</p>
+                <input type="file" id="fileInput" accept=".mp3,.wav,.mp4,.m4a,.ogg,.flac,.webm" hidden>
+            </div>
+
+            <!-- 檔案資訊 -->
+            <div class="file-info" id="fileInfo" style="display: none;">
+                <span class="file-name" id="fileName"></span>
+                <button class="btn-clear" id="clearBtn">✕</button>
+            </div>
+
+            <!-- 轉錄按鈕 -->
+            <button class="btn-transcribe" id="transcribeBtn" disabled>
+                <span class="btn-text">開始轉錄</span>
+                <span class="btn-loading" style="display: none;">
+                    <span class="spinner"></span>
+                    處理中...
+                </span>
+            </button>
+
+            <!-- 進度提示 -->
+            <div class="progress-section" id="progressSection" style="display: none;">
+                <div class="progress-header">
+                    <span class="progress-icon" id="progressIcon">📤</span>
+                    <span class="progress-status" id="progressStatus">準備中...</span>
+                </div>
+
+                <!-- 片段進度 -->
+                <div class="segment-info" id="segmentInfo" style="display: none;">
+                    <span id="segmentText">片段 0/0</span>
+                </div>
+
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+                <div class="progress-details">
+                    <span class="progress-stage" id="progressStage">階段 1/3</span>
+                    <span class="progress-percent" id="progressPercent">0%</span>
+                </div>
+                <div class="progress-info-text" id="progressInfoText">
+                    <p id="progressMessage">正在上傳音檔...</p>
+                    <p class="progress-hint" id="progressHint">請勿關閉此頁面</p>
+                </div>
+                <div class="elapsed-time" id="elapsedTime">已用時間: 0:00</div>
+            </div>
+
+            <!-- 結果區域 -->
+            <div class="result-section" id="resultSection" style="display: none;">
+                <h2>📝 轉錄結果</h2>
+                <div class="result-box">
+                    <textarea id="resultText" readonly></textarea>
+                </div>
+                <div class="result-actions">
+                    <button class="btn-copy" id="copyBtn">📋 複製文字</button>
+                    <button class="btn-download" id="downloadBtn">⬇️ 下載 TXT</button>
+                </div>
+            </div>
+
+            <!-- 錯誤訊息 -->
+            <div class="error-message" id="errorMessage" style="display: none;"></div>
+        </main>
+
+        <footer>
+            <p>使用 OpenAI Whisper 技術 | 本地處理，保護私隱</p>
+        </footer>
+    </div>
+
+    <script>
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const clearBtn = document.getElementById('clearBtn');
+        const transcribeBtn = document.getElementById('transcribeBtn');
+        const progressSection = document.getElementById('progressSection');
+        const progressIcon = document.getElementById('progressIcon');
+        const progressStatus = document.getElementById('progressStatus');
+        const progressBar = document.getElementById('progressBar');
+        const progressStage = document.getElementById('progressStage');
+        const progressPercent = document.getElementById('progressPercent');
+        const progressMessage = document.getElementById('progressMessage');
+        const progressHint = document.getElementById('progressHint');
+        const elapsedTimeEl = document.getElementById('elapsedTime');
+        const segmentInfo = document.getElementById('segmentInfo');
+        const segmentText = document.getElementById('segmentText');
+        const resultSection = document.getElementById('resultSection');
+        const resultText = document.getElementById('resultText');
+        const copyBtn = document.getElementById('copyBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const errorMessage = document.getElementById('errorMessage');
+
+        let selectedFile = null;
+        let downloadId = null;
+        let elapsedTimer = null;
+        let startTime = null;
+
+        // 格式化時間
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // 格式化檔案大小
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        // 開始計時
+        function startElapsedTimer() {
+            startTime = Date.now();
+            elapsedTimer = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                elapsedTimeEl.textContent = `已用時間: ${formatTime(elapsed)}`;
+            }, 1000);
+        }
+
+        // 停止計時
+        function stopElapsedTimer() {
+            if (elapsedTimer) {
+                clearInterval(elapsedTimer);
+                elapsedTimer = null;
+            }
+        }
+
+        // 更新進度顯示
+        function updateProgress(percent, icon, status, message, hint, stage = null) {
+            progressIcon.textContent = icon;
+            progressStatus.textContent = status;
+            progressBar.style.width = percent + '%';
+            progressPercent.textContent = percent + '%';
+            progressMessage.textContent = message;
+            if (hint) progressHint.textContent = hint;
+            if (stage) progressStage.textContent = stage;
+        }
+
+        // 顯示片段進度
+        function showSegmentProgress(current, total) {
+            segmentInfo.style.display = 'block';
+            segmentText.textContent = `片段 ${current}/${total}`;
+        }
+
+        // 點擊上傳區域
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        // 拖拽事件
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+
+        // 檔案選擇
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+
+        function handleFileSelect(file) {
+            selectedFile = file;
+            fileName.textContent = `${file.name} (${formatFileSize(file.size)})`;
+            fileInfo.style.display = 'flex';
+            uploadZone.style.display = 'none';
+            transcribeBtn.disabled = false;
+            hideError();
+            hideResult();
+        }
+
+        // 清除檔案
+        clearBtn.addEventListener('click', () => {
+            resetUpload();
+        });
+
+        function resetUpload() {
+            selectedFile = null;
+            fileInput.value = '';
+            fileInfo.style.display = 'none';
+            uploadZone.style.display = 'flex';
+            transcribeBtn.disabled = true;
+            segmentInfo.style.display = 'none';
+        }
+
+        // 開始轉錄
+        transcribeBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            const btnText = transcribeBtn.querySelector('.btn-text');
+            const btnLoading = transcribeBtn.querySelector('.btn-loading');
+
+            // 顯示載入狀態
+            btnText.style.display = 'none';
+            btnLoading.style.display = 'inline-flex';
+            transcribeBtn.disabled = true;
+            progressSection.style.display = 'block';
+            segmentInfo.style.display = 'none';
+            hideError();
+            hideResult();
+
+            // 開始計時
+            startElapsedTimer();
+
+            // 階段 1: 上傳
+            updateProgress(0, '📤', '上傳中', `正在上傳 ${selectedFile.name}...`, '請勿關閉此頁面', '階段 1/3 - 上傳');
+
+            try {
+                // 上傳檔案
+                const formData = new FormData();
+                formData.append('audio', selectedFile);
+
+                const uploadResponse = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const uploadData = await uploadResponse.json();
+
+                if (!uploadData.success) {
+                    throw new Error(uploadData.error || '上傳失敗');
+                }
+
+                const fileId = uploadData.file_id;
+                const totalSegments = uploadData.segment_count;
+                downloadId = fileId;
+
+                updateProgress(10, '📤', '上傳完成', '檔案已上傳，準備開始轉錄...',
+                    totalSegments > 1 ? `將分成 ${totalSegments} 個片段處理` : '單一片段處理',
+                    '階段 2/3 - 處理');
+
+                // 階段 2: 使用 SSE 接收轉錄進度
+                const eventSource = new EventSource(`/transcribe/${fileId}`);
+
+                eventSource.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    if (data.error) {
+                        eventSource.close();
+                        showError(data.error);
+                        resetUI();
+                        return;
+                    }
+
+                    // 更新進度
+                    const progress = data.progress || 0;
+
+                    if (data.stage === 'splitting') {
+                        updateProgress(progress, '✂️', '分割中', data.message, '正在分割長錄音...', '階段 2/3 - 分割');
+                    }
+                    else if (data.stage === 'transcribing') {
+                        const currentSeg = data.current_segment || 0;
+                        const totalSeg = data.total_segments || 1;
+                        showSegmentProgress(currentSeg, totalSeg);
+                        updateProgress(progress, '🎙️', '轉錄中', data.message,
+                            `第 ${currentSeg}/${totalSeg} 個片段`,
+                            `階段 2/3 - 轉錄 (${currentSeg}/${totalSeg})`);
+                    }
+                    else if (data.stage === 'finalizing') {
+                        updateProgress(progress, '📝', '處理中', data.message, '即將完成...', '階段 3/3 - 完成');
+                    }
+                    else if (data.stage === 'complete') {
+                        eventSource.close();
+                        updateProgress(100, '✅', '完成！', '轉錄成功！', '可以查看和下載結果', '完成');
+
+                        // 顯示結果
+                        setTimeout(() => {
+                            resultText.value = data.transcript;
+                            downloadId = data.download_id;
+                            resultSection.style.display = 'block';
+                            progressSection.style.display = 'none';
+                            resetUI();
+                        }, 500);
+                    }
+                };
+
+                eventSource.onerror = () => {
+                    eventSource.close();
+                    showError('連線中斷，請重試');
+                    resetUI();
+                };
+
+            } catch (error) {
+                showError(error.message || '處理失敗');
+                resetUI();
+            }
+        });
+
+        function resetUI() {
+            stopElapsedTimer();
+            const btnText = transcribeBtn.querySelector('.btn-text');
+            const btnLoading = transcribeBtn.querySelector('.btn-loading');
+            btnText.style.display = 'inline';
+            btnLoading.style.display = 'none';
+            transcribeBtn.disabled = false;
+        }
+
+        // 複製文字
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(resultText.value);
+                copyBtn.textContent = '✅ 已複製';
+                setTimeout(() => {
+                    copyBtn.textContent = '📋 複製文字';
+                }, 2000);
+            } catch (error) {
+                showError('複製失敗');
+            }
+        });
+
+        // 下載 TXT - 讓用戶選擇儲存位置
+        downloadBtn.addEventListener('click', async () => {
+            const content = resultText.value;
+            if (!content) return;
+
+            // 嘗試使用 File System Access API（讓用戶選擇儲存位置）
+            if ('showSaveFilePicker' in window) {
+                try {
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: '轉錄結果.txt',
+                        types: [{
+                            description: 'Text Files',
+                            accept: { 'text/plain': ['.txt'] }
+                        }]
+                    });
+                    const writable = await handle.createWritable();
+                    await writable.write(content);
+                    await writable.close();
+
+                    downloadBtn.textContent = '✅ 已儲存';
+                    setTimeout(() => {
+                        downloadBtn.textContent = '⬇️ 下載 TXT';
+                    }, 2000);
+                    return;
+                } catch (err) {
+                    // 用戶取消或發生錯誤，使用備用方案
+                    if (err.name === 'AbortError') return;
+                }
+            }
+
+            // 備用方案：提示用戶輸入檔名後下載
+            const filename = prompt('請輸入檔案名稱：', '轉錄結果') || '轉錄結果';
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename + '.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            progressSection.style.display = 'none';
+        }
+
+        function hideError() {
+            errorMessage.style.display = 'none';
+        }
+
+        function hideResult() {
+            resultSection.style.display = 'none';
+        }
+    </script>
+</body>
+
+</html>
