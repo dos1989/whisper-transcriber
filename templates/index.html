@@ -66,7 +66,22 @@
                         <input type="text" id="savePath" placeholder="/Users/你的名稱/Desktop" value="">
                         <button class="btn-browse" id="browseBtn" type="button">📂 瀏覽</button>
                     </div>
-                    <p class="save-hint">💡 轉錄完成後會自動以原始檔名儲存 TXT 檔案</p>
+                    <p class="save-hint">💡 轉錄完成後會自動以選定的格式儲存檔案</p>
+                </div>
+            </div>
+
+            <!-- 輸出格式設定 -->
+            <div class="format-settings" id="formatSettings">
+                <span class="settings-label">輸出格式：</span>
+                <div class="format-options">
+                    <label class="radio-container">
+                        <input type="radio" name="outputFormat" value="txt" checked>
+                        <span class="radio-label">純文字 (.txt)</span>
+                    </label>
+                    <label class="radio-container">
+                        <input type="radio" name="outputFormat" value="md">
+                        <span class="radio-label">Markdown (.md)</span>
+                    </label>
                 </div>
             </div>
 
@@ -208,7 +223,9 @@
         let autoSaveEnabled = false;
         let batchId = null;
         let elapsedTimer = null;
-        let startTime = null;
+        let outputFormat = 'txt';
+        let currentResultFormat = 'txt'; // 用於下載
+
 
         // 模式切換
         singleModeBtn.addEventListener('click', () => switchMode('single'));
@@ -255,6 +272,22 @@
                 browseBtn.textContent = originalText;
                 browseBtn.disabled = false;
             }
+        });
+
+        // 格式選擇初始化
+        const savedFormat = localStorage.getItem('outputFormat');
+        if (savedFormat) {
+            outputFormat = savedFormat;
+            const radio = document.querySelector(`input[name="outputFormat"][value="${savedFormat}"]`);
+            if (radio) radio.checked = true;
+        }
+
+        // 監聽格式變更
+        document.querySelectorAll('input[name="outputFormat"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                outputFormat = e.target.value;
+                localStorage.setItem('outputFormat', outputFormat);
+            });
         });
 
         function switchMode(newMode) {
@@ -516,7 +549,10 @@
                     uploadData.segment_count > 1 ? `將分成 ${uploadData.segment_count} 個片段處理` : '單一片段處理',
                     '階段 2/3 - 處理');
 
-                const eventSource = new EventSource(`/transcribe/${fileId}`);
+                const eventSource = new EventSource(`/transcribe/${fileId}?format=${outputFormat}`);
+
+                // 記錄當前使用的格式
+                currentResultFormat = outputFormat;
 
                 eventSource.onmessage = (event) => {
                     const data = JSON.parse(event.data);
@@ -545,9 +581,17 @@
                         eventSource.close();
                         updateProgress(100, '✅', '完成！', '轉錄成功！', '可以查看和下載結果', '完成');
 
+                        updateProgress(100, '✅', '完成！', '轉錄成功！', '可以查看和下載結果', '完成');
+
                         setTimeout(async () => {
                             resultText.value = data.transcript;
                             downloadId = data.download_id;
+                            // 使用後端返回的格式（如果有），否則使用請求時的格式
+                            if (data.format) currentResultFormat = data.format;
+
+                            // 更新下載按鈕文字
+                            downloadBtn.textContent = `⬇️ 下載 ${currentResultFormat.toUpperCase()}`;
+
                             resultSection.style.display = 'block';
                             progressSection.style.display = 'none';
                             resetUI();
@@ -562,7 +606,8 @@
                                             save_path: savePath.value,
                                             file_id: downloadId,
                                             original_name: selectedFile.name,
-                                            transcript: data.transcript
+                                            transcript: data.transcript,
+                                            format: currentResultFormat
                                         })
                                     });
                                     const saveData = await saveRes.json();
@@ -636,7 +681,10 @@
 
                 updateProgress(10, '📤', '上傳完成', `已上傳 ${totalFiles} 個檔案`, '準備開始轉錄...', '階段 2/3 - 處理');
 
-                const eventSource = new EventSource(`/transcribe-batch/${batchId}`);
+                const eventSource = new EventSource(`/transcribe-batch/${batchId}?format=${outputFormat}`);
+
+                // 記錄批量使用的格式
+                currentResultFormat = outputFormat;
 
                 eventSource.onmessage = (event) => {
                     const data = JSON.parse(event.data);
@@ -694,7 +742,8 @@
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({
                                             save_path: savePath.value,
-                                            files: fileResults
+                                            files: fileResults,
+                                            format: currentResultFormat
                                         })
                                     });
                                     const saveData = await saveRes.json();
@@ -746,6 +795,7 @@
                         <textarea readonly>${result.transcript}</textarea>
                         <div class="result-item-actions">
                             <button class="btn-copy-item" data-index="${index}">📋 複製</button>
+                            <a href="/download/${result.download_id}?format=${currentResultFormat}" class="btn-download-item" target="_blank" style="text-decoration:none;">⬇️ 下載 ${currentResultFormat.toUpperCase()}</a>
                         </div>
                     </div>
                 `;
@@ -794,40 +844,17 @@
             }
         });
 
-        // 下載單個 TXT
+        // 下載單個結果
         downloadBtn.addEventListener('click', async () => {
             const content = resultText.value;
             if (!content) return;
 
-            if ('showSaveFilePicker' in window) {
-                try {
-                    const handle = await window.showSaveFilePicker({
-                        suggestedName: '轉錄結果.txt',
-                        types: [{ description: 'Text Files', accept: { 'text/plain': ['.txt'] } }]
-                    });
-                    const writable = await handle.createWritable();
-                    await writable.write(content);
-                    await writable.close();
-
-                    downloadBtn.textContent = '✅ 已儲存';
-                    setTimeout(() => { downloadBtn.textContent = '⬇️ 下載 TXT'; }, 2000);
-                    return;
-                } catch (err) {
-                    if (err.name === 'AbortError') return;
-                }
+            if (downloadId) {
+                window.location.href = `/download/${downloadId}?format=${currentResultFormat}`;
             }
-
-            const filename = prompt('請輸入檔案名稱：', '轉錄結果') || '轉錄結果';
-            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename + '.txt';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
         });
+
+
 
         // 下載全部 ZIP
         downloadAllBtn.addEventListener('click', () => {

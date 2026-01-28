@@ -22,3 +22,6 @@ temp/
 
 # Logs
 *.log
+test_audio.mp3
+test_segments.py
+.agent/
