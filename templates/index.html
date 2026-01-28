@@ -70,20 +70,7 @@
                 </div>
             </div>
 
-            <!-- 輸出格式設定 -->
-            <div class="format-settings" id="formatSettings">
-                <span class="settings-label">輸出格式：</span>
-                <div class="format-options">
-                    <label class="radio-container">
-                        <input type="radio" name="outputFormat" value="txt" checked>
-                        <span class="radio-label">純文字 (.txt)</span>
-                    </label>
-                    <label class="radio-container">
-                        <input type="radio" name="outputFormat" value="md">
-                        <span class="radio-label">Markdown (.md)</span>
-                    </label>
-                </div>
-            </div>
+            <!-- 輸出格式設定已移除 (改為及時生成) -->
 
             <!-- 轉錄按鈕 -->
             <button class="btn-transcribe" id="transcribeBtn" disabled>
@@ -144,7 +131,9 @@
                 </div>
                 <div class="result-actions">
                     <button class="btn-copy" id="copyBtn">📋 複製文字</button>
-                    <button class="btn-download" id="downloadBtn">⬇️ 下載 TXT</button>
+                    <button class="btn-download" id="downloadBtnTxt">⬇️ 下載 TXT</button>
+                    <button class="btn-download" id="downloadBtnMd">⬇️ 下載 Markdown</button>
+                    <button class="btn-save-folder" id="manualSaveBtn" style="display:none;">📂 另存至指定資料夾</button>
                 </div>
             </div>
 
@@ -156,7 +145,7 @@
                 </div>
                 <div class="batch-result-list" id="batchResultList"></div>
                 <div class="result-actions">
-                    <button class="btn-download-all" id="downloadAllBtn">⬇️ 下載全部 (ZIP)</button>
+                    <button class="btn-download-all" id="downloadAllBtn">⬇️ 下載全部 (ZIP - 含 TXT & MD)</button>
                 </div>
             </div>
 
@@ -204,7 +193,9 @@
         const resultSection = document.getElementById('resultSection');
         const resultText = document.getElementById('resultText');
         const copyBtn = document.getElementById('copyBtn');
-        const downloadBtn = document.getElementById('downloadBtn');
+        const downloadBtnTxt = document.getElementById('downloadBtnTxt');
+        const downloadBtnMd = document.getElementById('downloadBtnMd');
+        const manualSaveBtn = document.getElementById('manualSaveBtn');
         const batchResultSection = document.getElementById('batchResultSection');
         const batchResultList = document.getElementById('batchResultList');
         const resultCount = document.getElementById('resultCount');
@@ -223,8 +214,6 @@
         let autoSaveEnabled = false;
         let batchId = null;
         let elapsedTimer = null;
-        let outputFormat = 'txt';
-        let currentResultFormat = 'txt'; // 用於下載
 
 
         // 模式切換
@@ -274,20 +263,42 @@
             }
         });
 
-        // 格式選擇初始化
-        const savedFormat = localStorage.getItem('outputFormat');
-        if (savedFormat) {
-            outputFormat = savedFormat;
-            const radio = document.querySelector(`input[name="outputFormat"][value="${savedFormat}"]`);
-            if (radio) radio.checked = true;
-        }
+        // 監聽手動儲存按鈕
+        manualSaveBtn.addEventListener('click', async () => {
+            if (!savePath.value) {
+                alert('請先設定儲存路徑');
+                savePathInput.style.display = 'block';
+                savePath.focus();
+                return;
+            }
+            if (!downloadId) return;
 
-        // 監聽格式變更
-        document.querySelectorAll('input[name="outputFormat"]').forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                outputFormat = e.target.value;
-                localStorage.setItem('outputFormat', outputFormat);
-            });
+            const originalText = manualSaveBtn.textContent;
+            manualSaveBtn.disabled = true;
+            manualSaveBtn.textContent = '儲存中...';
+
+            try {
+                const res = await fetch('/auto-save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        save_path: savePath.value,
+                        file_id: downloadId,
+                        original_name: selectedFile.name
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('儲存成功！\n檔案: ' + data.file_name + '\n路徑: ' + data.saved_path);
+                } else {
+                    alert('儲存失敗: ' + data.error);
+                }
+            } catch (e) {
+                alert('錯誤: ' + e.message);
+            } finally {
+                manualSaveBtn.disabled = false;
+                manualSaveBtn.textContent = originalText;
+            }
         });
 
         function switchMode(newMode) {
@@ -549,10 +560,7 @@
                     uploadData.segment_count > 1 ? `將分成 ${uploadData.segment_count} 個片段處理` : '單一片段處理',
                     '階段 2/3 - 處理');
 
-                const eventSource = new EventSource(`/transcribe/${fileId}?format=${outputFormat}`);
-
-                // 記錄當前使用的格式
-                currentResultFormat = outputFormat;
+                const eventSource = new EventSource(`/transcribe/${fileId}`);
 
                 eventSource.onmessage = (event) => {
                     const data = JSON.parse(event.data);
@@ -586,11 +594,13 @@
                         setTimeout(async () => {
                             resultText.value = data.transcript;
                             downloadId = data.download_id;
-                            // 使用後端返回的格式（如果有），否則使用請求時的格式
-                            if (data.format) currentResultFormat = data.format;
 
-                            // 更新下載按鈕文字
-                            downloadBtn.textContent = `⬇️ 下載 ${currentResultFormat.toUpperCase()}`;
+                            // 更新下載按鈕事件
+                            downloadBtnTxt.onclick = () => window.location.href = `/download/${downloadId}?format=txt`;
+                            downloadBtnMd.onclick = () => window.location.href = `/download/${downloadId}?format=md`;
+
+                            // 顯示手動儲存按鈕
+                            manualSaveBtn.style.display = 'inline-block';
 
                             resultSection.style.display = 'block';
                             progressSection.style.display = 'none';
@@ -605,9 +615,7 @@
                                         body: JSON.stringify({
                                             save_path: savePath.value,
                                             file_id: downloadId,
-                                            original_name: selectedFile.name,
-                                            transcript: data.transcript,
-                                            format: currentResultFormat
+                                            original_name: selectedFile.name
                                         })
                                     });
                                     const saveData = await saveRes.json();
@@ -681,10 +689,7 @@
 
                 updateProgress(10, '📤', '上傳完成', `已上傳 ${totalFiles} 個檔案`, '準備開始轉錄...', '階段 2/3 - 處理');
 
-                const eventSource = new EventSource(`/transcribe-batch/${batchId}?format=${outputFormat}`);
-
-                // 記錄批量使用的格式
-                currentResultFormat = outputFormat;
+                const eventSource = new EventSource(`/transcribe-batch/${batchId}`);
 
                 eventSource.onmessage = (event) => {
                     const data = JSON.parse(event.data);
@@ -742,8 +747,7 @@
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({
                                             save_path: savePath.value,
-                                            files: fileResults,
-                                            format: currentResultFormat
+                                            files: fileResults
                                         })
                                     });
                                     const saveData = await saveRes.json();
@@ -791,11 +795,12 @@
                         <span class="result-item-name">📄 ${result.name}</span>
                         <button class="btn-expand" data-index="${index}">展開</button>
                     </div>
-                    <div class="result-item-content" id="resultContent${index}" style="display: none;">
+                <div class="result-item-content" id="resultContent${index}" style="display: none;">
                         <textarea readonly>${result.transcript}</textarea>
                         <div class="result-item-actions">
                             <button class="btn-copy-item" data-index="${index}">📋 複製</button>
-                            <a href="/download/${result.download_id}?format=${currentResultFormat}" class="btn-download-item" target="_blank" style="text-decoration:none;">⬇️ 下載 ${currentResultFormat.toUpperCase()}</a>
+                            <a href="/download/${result.download_id}?format=txt" class="btn-download-item" target="_blank" style="text-decoration:none;">⬇️ TXT</a>
+                            <a href="/download/${result.download_id}?format=md" class="btn-download-item" target="_blank" style="text-decoration:none;">⬇️ Markdown</a>
                         </div>
                     </div>
                 `;

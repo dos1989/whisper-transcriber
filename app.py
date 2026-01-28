@@ -162,19 +162,29 @@ def transcribe_audio(audio_path, file_id, output_format='txt'):
         # 階段 3: 合併結果並轉換為繁體中文
         yield {'stage': 'finalizing', 'progress': 95, 'message': '正在合併結果並轉換為繁體中文...'}
         
-        transcript = '\n\n'.join(all_transcripts) if was_split else (all_transcripts[0] if all_transcripts else '')
+        # 轉換所有片段為繁體中文
+        translated_segments = []
+        for text in all_transcripts:
+            translated_segments.append(cc.convert(text))
+            
+        # 生成 TXT 內容 (單換行)
+        txt_content = '\n'.join(translated_segments)
         
-        # 將簡體中文轉換為繁體中文
-        transcript = cc.convert(transcript)
+        # 生成 Markdown 內容 (雙換行分段)
+        md_content = '\n\n'.join(translated_segments)
         
-        # 儲存結果
-        ext = 'md' if output_format == 'md' else 'txt'
-        output_path = os.path.join(OUTPUT_FOLDER, f'{file_id}.{ext}')
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(transcript)
+        # 儲存 TXT
+        txt_path = os.path.join(OUTPUT_FOLDER, f'{file_id}.txt')
+        with open(txt_path, 'w', encoding='utf-8') as f:
+            f.write(txt_content)
+            
+        # 儲存 Markdown
+        md_path = os.path.join(OUTPUT_FOLDER, f'{file_id}.md')
+        with open(md_path, 'w', encoding='utf-8') as f:
+            f.write(md_content)
         
-        # 完成
-        yield {'stage': 'complete', 'progress': 100, 'message': '轉錄完成！', 'transcript': transcript, 'download_id': file_id, 'format': ext}
+        # 完成 (返回默認內容為 Markdown 以供預覽，但下載 ID 可用於兩種格式)
+        yield {'stage': 'complete', 'progress': 100, 'message': '轉錄完成！', 'transcript': md_content, 'download_id': file_id}
             
     except Exception as e:
         print(f"轉錄錯誤: {e}")
@@ -431,22 +441,18 @@ def download_batch(batch_id):
         for file_info in batch['files']:
             file_id = file_info['file_id']
             original_name = file_info['original_name']
+            base_name = os.path.splitext(original_name)[0]
             
             md_path = os.path.join(OUTPUT_FOLDER, f'{file_id}.md')
             txt_path = os.path.join(OUTPUT_FOLDER, f'{file_id}.txt')
             
-            source_path = None
-            archive_name = None
-            
+            # 添加 Markdown
             if os.path.exists(md_path):
-                source_path = md_path
-                archive_name = os.path.splitext(original_name)[0] + '.md'
-            elif os.path.exists(txt_path):
-                source_path = txt_path
-                archive_name = os.path.splitext(original_name)[0] + '.txt'
-            
-            if source_path:
-                zipf.write(source_path, archive_name)
+                zipf.write(md_path, f'{base_name}.md')
+                
+            # 添加 TXT
+            if os.path.exists(txt_path):
+                zipf.write(txt_path, f'{base_name}.txt')
     
     return send_file(
         zip_path,
@@ -458,34 +464,46 @@ def download_batch(batch_id):
 
 @app.route('/auto-save', methods=['POST'])
 def auto_save():
-    """自動儲存轉錄結果到指定路徑"""
+    """自動儲存轉錄結果到指定路徑 (複製 .txt 和 .md)"""
     data = request.get_json()
     
     save_path = data.get('save_path', '')
     original_name = data.get('original_name', '')
-    transcript = data.get('transcript', '')
-    output_format = data.get('format', 'txt')  # txt 或 md
+    file_id = data.get('file_id') # 必須提供 file_id 來查找原始檔案
     
-    if not save_path or not original_name or not transcript:
+    if not save_path or not original_name or not file_id:
         return jsonify({'error': '缺少必要參數'}), 400
     
     # 驗證路徑是否存在
     if not os.path.isdir(save_path):
         return jsonify({'error': f'路徑不存在: {save_path}'}), 400
     
-    # 生成輸出檔名
-    ext = 'md' if output_format == 'md' else 'txt'
-    file_name = os.path.splitext(original_name)[0] + f'.{ext}'
-    output_path = os.path.join(save_path, file_name)
+    saved_files = []
     
     try:
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(transcript)
+        base_name = os.path.splitext(original_name)[0]
+        
+        # 複製 TXT
+        src_txt = os.path.join(OUTPUT_FOLDER, f'{file_id}.txt')
+        dst_txt = os.path.join(save_path, f'{base_name}.txt')
+        if os.path.exists(src_txt):
+            shutil.copy2(src_txt, dst_txt)
+            saved_files.append(f'{base_name}.txt')
+            
+        # 複製 Markdown
+        src_md = os.path.join(OUTPUT_FOLDER, f'{file_id}.md')
+        dst_md = os.path.join(save_path, f'{base_name}.md')
+        if os.path.exists(src_md):
+            shutil.copy2(src_md, dst_md)
+            saved_files.append(f'{base_name}.md')
+            
+        if not saved_files:
+             return jsonify({'error': '找不到原始輸出檔案'}), 404
         
         return jsonify({
             'success': True,
-            'saved_path': output_path,
-            'file_name': file_name
+            'saved_path': save_path,
+            'file_name': ', '.join(saved_files)
         })
     except Exception as e:
         return jsonify({'error': f'儲存失敗: {str(e)}'}), 500
@@ -497,8 +515,7 @@ def auto_save_batch():
     data = request.get_json()
     
     save_path = data.get('save_path', '')
-    files = data.get('files', [])
-    output_format = data.get('format', 'txt')
+    files = data.get('files', []) # 包含 file_id 和 name
     
     if not save_path or not files:
         return jsonify({'error': '缺少必要參數'}), 400
@@ -506,31 +523,39 @@ def auto_save_batch():
     if not os.path.isdir(save_path):
         return jsonify({'error': f'路徑不存在: {save_path}'}), 400
     
-    saved_files = []
+    saved_count = 0
     errors = []
     
     for file_info in files:
-        original_name = file_info.get('name', '')
-        transcript = file_info.get('transcript', '')
-        
-        if not original_name or not transcript:
-            continue
-        
-        ext = 'md' if output_format == 'md' else 'txt'
-        file_name = os.path.splitext(original_name)[0] + f'.{ext}'
-        output_path = os.path.join(save_path, file_name)
-        
         try:
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(transcript)
-            saved_files.append(file_name)
+            original_name = file_info.get('name', '')
+            file_id = file_info.get('download_id') # 前端傳來的可能是 download_id
+            
+            if not original_name or not file_id:
+                continue
+                
+            base_name = os.path.splitext(original_name)[0]
+            
+            # 複製 TXT
+            src_txt = os.path.join(OUTPUT_FOLDER, f'{file_id}.txt')
+            dst_txt = os.path.join(save_path, f'{base_name}.txt')
+            if os.path.exists(src_txt):
+                shutil.copy2(src_txt, dst_txt)
+                
+            # 複製 Markdown
+            src_md = os.path.join(OUTPUT_FOLDER, f'{file_id}.md')
+            dst_md = os.path.join(save_path, f'{base_name}.md')
+            if os.path.exists(src_md):
+                shutil.copy2(src_md, dst_md)
+                
+            saved_count += 1
+            
         except Exception as e:
-            errors.append(f'{file_name}: {str(e)}')
+            errors.append(f"{original_name}: {str(e)}")
     
     return jsonify({
         'success': True,
-        'saved_count': len(saved_files),
-        'saved_files': saved_files,
+        'saved_count': saved_count,
         'errors': errors
     })
 
