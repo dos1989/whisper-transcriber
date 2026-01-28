@@ -16,18 +16,58 @@
         </header>
 
         <main>
+            <!-- 模式切換 -->
+            <div class="mode-toggle">
+                <button class="mode-btn active" id="singleModeBtn" data-mode="single">
+                    <span class="mode-icon">📄</span>
+                    單檔模式
+                </button>
+                <button class="mode-btn" id="batchModeBtn" data-mode="batch">
+                    <span class="mode-icon">📁</span>
+                    批量模式
+                </button>
+            </div>
+
             <!-- 上傳區域 -->
             <div class="upload-zone" id="uploadZone">
                 <div class="upload-icon">📁</div>
-                <p class="upload-text">拖拽音檔到這裡，或點擊選擇檔案</p>
-                <p class="upload-hint">支援格式：MP3, WAV, M4A, OGG, FLAC</p>
+                <p class="upload-text" id="uploadText">拖拽音檔到這裡，或點擊選擇檔案</p>
+                <p class="upload-hint">支援格式：MP3, WAV, M4A, OGG, FLAC（最多 10 個檔案）</p>
                 <input type="file" id="fileInput" accept=".mp3,.wav,.mp4,.m4a,.ogg,.flac,.webm" hidden>
             </div>
 
-            <!-- 檔案資訊 -->
+            <!-- 單檔資訊 -->
             <div class="file-info" id="fileInfo" style="display: none;">
                 <span class="file-name" id="fileName"></span>
                 <button class="btn-clear" id="clearBtn">✕</button>
+            </div>
+
+            <!-- 批量檔案隊列 -->
+            <div class="file-queue" id="fileQueue" style="display: none;">
+                <div class="queue-header">
+                    <h3>📋 檔案隊列 <span id="queueCount">(0 個檔案)</span></h3>
+                    <button class="btn-clear-all" id="clearAllBtn">清除全部</button>
+                </div>
+                <div class="queue-list" id="queueList"></div>
+            </div>
+
+            <!-- 自動儲存設定 -->
+            <div class="save-settings" id="saveSettings">
+                <div class="save-toggle">
+                    <label class="toggle-container">
+                        <input type="checkbox" id="autoSaveToggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <span class="toggle-label">自動儲存到指定路徑</span>
+                </div>
+                <div class="save-path-input" id="savePathInput" style="display: none;">
+                    <label for="savePath">儲存路徑：</label>
+                    <div class="input-group">
+                        <input type="text" id="savePath" placeholder="/Users/你的名稱/Desktop" value="">
+                        <button class="btn-browse" id="browseBtn" type="button">📂 瀏覽</button>
+                    </div>
+                    <p class="save-hint">💡 轉錄完成後會自動以原始檔名儲存 TXT 檔案</p>
+                </div>
             </div>
 
             <!-- 轉錄按鈕 -->
@@ -41,9 +81,25 @@
 
             <!-- 進度提示 -->
             <div class="progress-section" id="progressSection" style="display: none;">
+                <!-- 批量進度（頂部） -->
+                <div class="batch-progress" id="batchProgress" style="display: none;">
+                    <div class="batch-header">
+                        <span id="batchTitle">處理進度</span>
+                        <span id="batchCount">0/0</span>
+                    </div>
+                    <div class="batch-bar-container">
+                        <div class="batch-bar" id="batchBar"></div>
+                    </div>
+                </div>
+
                 <div class="progress-header">
                     <span class="progress-icon" id="progressIcon">📤</span>
                     <span class="progress-status" id="progressStatus">準備中...</span>
+                </div>
+
+                <!-- 當前檔案名稱（批量時顯示） -->
+                <div class="current-file" id="currentFile" style="display: none;">
+                    正在處理: <span id="currentFileName"></span>
                 </div>
 
                 <!-- 片段進度 -->
@@ -65,7 +121,7 @@
                 <div class="elapsed-time" id="elapsedTime">已用時間: 0:00</div>
             </div>
 
-            <!-- 結果區域 -->
+            <!-- 結果區域（單檔） -->
             <div class="result-section" id="resultSection" style="display: none;">
                 <h2>📝 轉錄結果</h2>
                 <div class="result-box">
@@ -74,6 +130,18 @@
                 <div class="result-actions">
                     <button class="btn-copy" id="copyBtn">📋 複製文字</button>
                     <button class="btn-download" id="downloadBtn">⬇️ 下載 TXT</button>
+                </div>
+            </div>
+
+            <!-- 結果區域（批量） -->
+            <div class="batch-result-section" id="batchResultSection" style="display: none;">
+                <h2>📝 批量轉錄完成</h2>
+                <div class="batch-result-summary">
+                    <span class="result-count" id="resultCount">已完成 0 個檔案</span>
+                </div>
+                <div class="batch-result-list" id="batchResultList"></div>
+                <div class="result-actions">
+                    <button class="btn-download-all" id="downloadAllBtn">⬇️ 下載全部 (ZIP)</button>
                 </div>
             </div>
 
@@ -87,13 +155,27 @@
     </div>
 
     <script>
+        // DOM 元素
+        const singleModeBtn = document.getElementById('singleModeBtn');
+        const batchModeBtn = document.getElementById('batchModeBtn');
         const uploadZone = document.getElementById('uploadZone');
+        const uploadText = document.getElementById('uploadText');
         const fileInput = document.getElementById('fileInput');
         const fileInfo = document.getElementById('fileInfo');
         const fileName = document.getElementById('fileName');
         const clearBtn = document.getElementById('clearBtn');
+        const fileQueue = document.getElementById('fileQueue');
+        const queueList = document.getElementById('queueList');
+        const queueCount = document.getElementById('queueCount');
+        const clearAllBtn = document.getElementById('clearAllBtn');
         const transcribeBtn = document.getElementById('transcribeBtn');
         const progressSection = document.getElementById('progressSection');
+        const batchProgress = document.getElementById('batchProgress');
+        const batchTitle = document.getElementById('batchTitle');
+        const batchCount = document.getElementById('batchCount');
+        const batchBar = document.getElementById('batchBar');
+        const currentFile = document.getElementById('currentFile');
+        const currentFileName = document.getElementById('currentFileName');
         const progressIcon = document.getElementById('progressIcon');
         const progressStatus = document.getElementById('progressStatus');
         const progressBar = document.getElementById('progressBar');
@@ -108,12 +190,91 @@
         const resultText = document.getElementById('resultText');
         const copyBtn = document.getElementById('copyBtn');
         const downloadBtn = document.getElementById('downloadBtn');
+        const batchResultSection = document.getElementById('batchResultSection');
+        const batchResultList = document.getElementById('batchResultList');
+        const resultCount = document.getElementById('resultCount');
+        const downloadAllBtn = document.getElementById('downloadAllBtn');
         const errorMessage = document.getElementById('errorMessage');
+        const autoSaveToggle = document.getElementById('autoSaveToggle');
+        const savePathInput = document.getElementById('savePathInput');
+        const savePath = document.getElementById('savePath');
+        const browseBtn = document.getElementById('browseBtn');
 
+        // 狀態
+        let mode = 'single'; // 'single' or 'batch'
         let selectedFile = null;
+        let selectedFiles = [];
         let downloadId = null;
+        let autoSaveEnabled = false;
+        let batchId = null;
         let elapsedTimer = null;
         let startTime = null;
+
+        // 模式切換
+        singleModeBtn.addEventListener('click', () => switchMode('single'));
+        batchModeBtn.addEventListener('click', () => switchMode('batch'));
+
+        // 自動儲存開關
+        autoSaveToggle.addEventListener('change', () => {
+            autoSaveEnabled = autoSaveToggle.checked;
+            savePathInput.style.display = autoSaveEnabled ? 'block' : 'none';
+
+            // 嘗試從 localStorage 讀取上次使用的路徑
+            if (autoSaveEnabled && !savePath.value) {
+                const lastPath = localStorage.getItem('autoSavePath');
+                if (lastPath) savePath.value = lastPath;
+            }
+        });
+
+        // 儲存路徑變更時記住
+        savePath.addEventListener('change', () => {
+            localStorage.setItem('autoSavePath', savePath.value);
+        });
+
+        // 瀏覽按鈕點擊
+        browseBtn.addEventListener('click', async () => {
+            const originalText = browseBtn.textContent;
+            browseBtn.textContent = '⏳ 開啟中...';
+            browseBtn.disabled = true;
+
+            try {
+                const res = await fetch('/select-folder', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    savePath.value = data.path;
+                    localStorage.setItem('autoSavePath', data.path); // 更新記憶
+                } else if (data.message === 'User cancelled') {
+                    // 用戶取消，不做任何事
+                } else {
+                    showError('選擇路徑失敗: ' + (data.error || '未知錯誤'));
+                }
+            } catch (err) {
+                showError('無法開啟資料夾選擇器: ' + err.message);
+            } finally {
+                browseBtn.textContent = originalText;
+                browseBtn.disabled = false;
+            }
+        });
+
+        function switchMode(newMode) {
+            mode = newMode;
+
+            // 更新按鈕狀態
+            singleModeBtn.classList.toggle('active', mode === 'single');
+            batchModeBtn.classList.toggle('active', mode === 'batch');
+
+            // 更新 file input
+            fileInput.multiple = (mode === 'batch');
+
+            // 更新提示文字
+            uploadText.textContent = mode === 'batch'
+                ? '拖拽多個音檔到這裡，或點擊選擇'
+                : '拖拽音檔到這裡，或點擊選擇檔案';
+
+            // 清除狀態
+            resetAll();
+        }
 
         // 格式化時間
         function formatTime(seconds) {
@@ -127,6 +288,12 @@
             if (bytes < 1024) return bytes + ' B';
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        // 格式化時長
+        function formatDuration(seconds) {
+            if (seconds < 60) return `${Math.round(seconds)} 秒`;
+            return `${Math.round(seconds / 60)} 分鐘`;
         }
 
         // 開始計時
@@ -179,20 +346,26 @@
         uploadZone.addEventListener('drop', (e) => {
             e.preventDefault();
             uploadZone.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFileSelect(files[0]);
+            const files = Array.from(e.dataTransfer.files);
+            if (mode === 'single' && files.length > 0) {
+                handleSingleFile(files[0]);
+            } else if (mode === 'batch') {
+                handleBatchFiles(files);
             }
         });
 
         // 檔案選擇
         fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleFileSelect(e.target.files[0]);
+            const files = Array.from(e.target.files);
+            if (mode === 'single' && files.length > 0) {
+                handleSingleFile(files[0]);
+            } else if (mode === 'batch') {
+                handleBatchFiles(files);
             }
         });
 
-        function handleFileSelect(file) {
+        // 處理單檔選擇
+        function handleSingleFile(file) {
             selectedFile = file;
             fileName.textContent = `${file.name} (${formatFileSize(file.size)})`;
             fileInfo.style.display = 'flex';
@@ -202,12 +375,72 @@
             hideResult();
         }
 
-        // 清除檔案
-        clearBtn.addEventListener('click', () => {
-            resetUpload();
-        });
+        // 處理批量選擇
+        function handleBatchFiles(files) {
+            // 過濾有效檔案
+            const validFiles = files.filter(f => {
+                const ext = f.name.split('.').pop().toLowerCase();
+                return ['mp3', 'wav', 'mp4', 'm4a', 'ogg', 'flac', 'webm'].includes(ext);
+            });
 
-        function resetUpload() {
+            if (validFiles.length === 0) {
+                showError('沒有有效的音檔');
+                return;
+            }
+
+            if (selectedFiles.length + validFiles.length > 10) {
+                showError('最多只能上傳 10 個檔案');
+                return;
+            }
+
+            selectedFiles = [...selectedFiles, ...validFiles];
+            renderFileQueue();
+            uploadZone.style.display = 'none';
+            fileQueue.style.display = 'block';
+            transcribeBtn.disabled = false;
+            hideError();
+            hideResult();
+        }
+
+        // 渲染檔案隊列
+        function renderFileQueue() {
+            queueList.innerHTML = '';
+            queueCount.textContent = `(${selectedFiles.length} 個檔案)`;
+
+            selectedFiles.forEach((file, index) => {
+                const item = document.createElement('div');
+                item.className = 'queue-item';
+                item.innerHTML = `
+                    <div class="queue-item-info">
+                        <span class="queue-item-name">${file.name}</span>
+                        <span class="queue-item-size">${formatFileSize(file.size)}</span>
+                    </div>
+                    <button class="queue-item-remove" data-index="${index}">✕</button>
+                `;
+                queueList.appendChild(item);
+            });
+
+            // 移除單個檔案
+            queueList.querySelectorAll('.queue-item-remove').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const index = parseInt(e.target.dataset.index);
+                    selectedFiles.splice(index, 1);
+                    if (selectedFiles.length === 0) {
+                        resetBatchUpload();
+                    } else {
+                        renderFileQueue();
+                    }
+                });
+            });
+        }
+
+        // 清除單檔
+        clearBtn.addEventListener('click', () => resetSingleUpload());
+
+        // 清除全部
+        clearAllBtn.addEventListener('click', () => resetBatchUpload());
+
+        function resetSingleUpload() {
             selectedFile = null;
             fileInput.value = '';
             fileInfo.style.display = 'none';
@@ -216,30 +449,52 @@
             segmentInfo.style.display = 'none';
         }
 
+        function resetBatchUpload() {
+            selectedFiles = [];
+            fileInput.value = '';
+            fileQueue.style.display = 'none';
+            uploadZone.style.display = 'flex';
+            transcribeBtn.disabled = true;
+        }
+
+        function resetAll() {
+            resetSingleUpload();
+            resetBatchUpload();
+            hideResult();
+            hideError();
+            progressSection.style.display = 'none';
+        }
+
         // 開始轉錄
         transcribeBtn.addEventListener('click', async () => {
+            if (mode === 'single') {
+                await startSingleTranscription();
+            } else {
+                await startBatchTranscription();
+            }
+        });
+
+        // 單檔轉錄
+        async function startSingleTranscription() {
             if (!selectedFile) return;
 
             const btnText = transcribeBtn.querySelector('.btn-text');
             const btnLoading = transcribeBtn.querySelector('.btn-loading');
 
-            // 顯示載入狀態
             btnText.style.display = 'none';
             btnLoading.style.display = 'inline-flex';
             transcribeBtn.disabled = true;
             progressSection.style.display = 'block';
+            batchProgress.style.display = 'none';
+            currentFile.style.display = 'none';
             segmentInfo.style.display = 'none';
             hideError();
             hideResult();
 
-            // 開始計時
             startElapsedTimer();
-
-            // 階段 1: 上傳
             updateProgress(0, '📤', '上傳中', `正在上傳 ${selectedFile.name}...`, '請勿關閉此頁面', '階段 1/3 - 上傳');
 
             try {
-                // 上傳檔案
                 const formData = new FormData();
                 formData.append('audio', selectedFile);
 
@@ -255,14 +510,12 @@
                 }
 
                 const fileId = uploadData.file_id;
-                const totalSegments = uploadData.segment_count;
                 downloadId = fileId;
 
                 updateProgress(10, '📤', '上傳完成', '檔案已上傳，準備開始轉錄...',
-                    totalSegments > 1 ? `將分成 ${totalSegments} 個片段處理` : '單一片段處理',
+                    uploadData.segment_count > 1 ? `將分成 ${uploadData.segment_count} 個片段處理` : '單一片段處理',
                     '階段 2/3 - 處理');
 
-                // 階段 2: 使用 SSE 接收轉錄進度
                 const eventSource = new EventSource(`/transcribe/${fileId}`);
 
                 eventSource.onmessage = (event) => {
@@ -275,34 +528,53 @@
                         return;
                     }
 
-                    // 更新進度
                     const progress = data.progress || 0;
 
                     if (data.stage === 'splitting') {
                         updateProgress(progress, '✂️', '分割中', data.message, '正在分割長錄音...', '階段 2/3 - 分割');
-                    }
-                    else if (data.stage === 'transcribing') {
+                    } else if (data.stage === 'transcribing') {
                         const currentSeg = data.current_segment || 0;
                         const totalSeg = data.total_segments || 1;
                         showSegmentProgress(currentSeg, totalSeg);
                         updateProgress(progress, '🎙️', '轉錄中', data.message,
                             `第 ${currentSeg}/${totalSeg} 個片段`,
                             `階段 2/3 - 轉錄 (${currentSeg}/${totalSeg})`);
-                    }
-                    else if (data.stage === 'finalizing') {
+                    } else if (data.stage === 'finalizing') {
                         updateProgress(progress, '📝', '處理中', data.message, '即將完成...', '階段 3/3 - 完成');
-                    }
-                    else if (data.stage === 'complete') {
+                    } else if (data.stage === 'complete') {
                         eventSource.close();
                         updateProgress(100, '✅', '完成！', '轉錄成功！', '可以查看和下載結果', '完成');
 
-                        // 顯示結果
-                        setTimeout(() => {
+                        setTimeout(async () => {
                             resultText.value = data.transcript;
                             downloadId = data.download_id;
                             resultSection.style.display = 'block';
                             progressSection.style.display = 'none';
                             resetUI();
+
+                            // 自動儲存
+                            if (autoSaveEnabled && savePath.value) {
+                                try {
+                                    const saveRes = await fetch('/auto-save', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                            save_path: savePath.value,
+                                            file_id: downloadId,
+                                            original_name: selectedFile.name,
+                                            transcript: data.transcript
+                                        })
+                                    });
+                                    const saveData = await saveRes.json();
+                                    if (saveData.success) {
+                                        showAutoSaveSuccess(saveData.saved_path);
+                                    } else {
+                                        showError('自動儲存失敗: ' + saveData.error);
+                                    }
+                                } catch (e) {
+                                    showError('自動儲存失敗: ' + e.message);
+                                }
+                            }
                         }, 500);
                     }
                 };
@@ -317,7 +589,190 @@
                 showError(error.message || '處理失敗');
                 resetUI();
             }
-        });
+        }
+
+        // 批量轉錄
+        async function startBatchTranscription() {
+            if (selectedFiles.length === 0) return;
+
+            const btnText = transcribeBtn.querySelector('.btn-text');
+            const btnLoading = transcribeBtn.querySelector('.btn-loading');
+
+            btnText.style.display = 'none';
+            btnLoading.style.display = 'inline-flex';
+            transcribeBtn.disabled = true;
+            progressSection.style.display = 'block';
+            batchProgress.style.display = 'block';
+            currentFile.style.display = 'block';
+            segmentInfo.style.display = 'none';
+            hideError();
+            hideResult();
+
+            startElapsedTimer();
+            updateProgress(0, '📤', '上傳中', '正在上傳檔案...', '請勿關閉此頁面', '階段 1/3 - 上傳');
+            batchCount.textContent = `0/${selectedFiles.length}`;
+            batchBar.style.width = '0%';
+
+            try {
+                const formData = new FormData();
+                selectedFiles.forEach(file => {
+                    formData.append('audio', file);
+                });
+
+                const uploadResponse = await fetch('/upload-batch', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const uploadData = await uploadResponse.json();
+
+                if (!uploadData.success) {
+                    throw new Error(uploadData.error || '上傳失敗');
+                }
+
+                batchId = uploadData.batch_id;
+                const totalFiles = uploadData.total;
+                const fileResults = [];
+
+                updateProgress(10, '📤', '上傳完成', `已上傳 ${totalFiles} 個檔案`, '準備開始轉錄...', '階段 2/3 - 處理');
+
+                const eventSource = new EventSource(`/transcribe-batch/${batchId}`);
+
+                eventSource.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    if (data.error) {
+                        eventSource.close();
+                        showError(data.error);
+                        resetUI();
+                        return;
+                    }
+
+                    // 更新批量進度
+                    if (data.batch_progress !== undefined) {
+                        batchBar.style.width = data.batch_progress + '%';
+                    }
+
+                    if (data.stage === 'file_start') {
+                        currentFileName.textContent = data.file_name;
+                        batchCount.textContent = `${data.file_index + 1}/${data.total_files}`;
+                    } else if (data.stage === 'splitting') {
+                        updateProgress(data.progress, '✂️', '分割中', data.message, '', '分割');
+                    } else if (data.stage === 'transcribing') {
+                        const currentSeg = data.current_segment || 0;
+                        const totalSeg = data.total_segments || 1;
+                        if (totalSeg > 1) {
+                            showSegmentProgress(currentSeg, totalSeg);
+                        }
+                        updateProgress(data.progress, '🎙️', '轉錄中', data.message, '', '轉錄');
+                    } else if (data.stage === 'finalizing') {
+                        updateProgress(data.progress, '📝', '處理中', data.message, '', '完成');
+                    } else if (data.stage === 'complete') {
+                        // 單個檔案完成，記錄結果
+                        fileResults.push({
+                            name: data.file_name,
+                            transcript: data.transcript,
+                            download_id: data.download_id
+                        });
+                    } else if (data.stage === 'file_complete') {
+                        batchCount.textContent = `${data.completed}/${data.total_files}`;
+                        batchBar.style.width = ((data.completed / data.total_files) * 100) + '%';
+                    } else if (data.stage === 'batch_complete') {
+                        eventSource.close();
+                        updateProgress(100, '✅', '全部完成！', data.message, '', '完成');
+
+                        setTimeout(async () => {
+                            showBatchResults(fileResults);
+                            progressSection.style.display = 'none';
+                            resetUI();
+
+                            // 批量自動儲存
+                            if (autoSaveEnabled && savePath.value) {
+                                try {
+                                    const saveRes = await fetch('/auto-save-batch', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                            save_path: savePath.value,
+                                            files: fileResults
+                                        })
+                                    });
+                                    const saveData = await saveRes.json();
+                                    if (saveData.success) {
+                                        const msg = `已自動儲存 ${saveData.saved_count} 個檔案`;
+                                        if (saveData.errors.length > 0) {
+                                            showError(msg + `，但有 ${saveData.errors.length} 個失敗`);
+                                        } else {
+                                            showAutoSaveSuccess(savePath.value);
+                                        }
+                                    } else {
+                                        showError('自動儲存失敗: ' + saveData.error);
+                                    }
+                                } catch (e) {
+                                    showError('自動儲存失敗: ' + e.message);
+                                }
+                            }
+                        }, 500);
+                    }
+                };
+
+                eventSource.onerror = () => {
+                    eventSource.close();
+                    showError('連線中斷，請重試');
+                    resetUI();
+                };
+
+            } catch (error) {
+                showError(error.message || '處理失敗');
+                resetUI();
+            }
+        }
+
+        // 顯示批量結果
+        function showBatchResults(results) {
+            batchResultSection.style.display = 'block';
+            resultCount.textContent = `已完成 ${results.length} 個檔案`;
+            batchResultList.innerHTML = '';
+
+            results.forEach((result, index) => {
+                const item = document.createElement('div');
+                item.className = 'batch-result-item';
+                item.innerHTML = `
+                    <div class="result-item-header">
+                        <span class="result-item-name">📄 ${result.name}</span>
+                        <button class="btn-expand" data-index="${index}">展開</button>
+                    </div>
+                    <div class="result-item-content" id="resultContent${index}" style="display: none;">
+                        <textarea readonly>${result.transcript}</textarea>
+                        <div class="result-item-actions">
+                            <button class="btn-copy-item" data-index="${index}">📋 複製</button>
+                        </div>
+                    </div>
+                `;
+                batchResultList.appendChild(item);
+            });
+
+            // 展開/收起
+            batchResultList.querySelectorAll('.btn-expand').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const index = e.target.dataset.index;
+                    const content = document.getElementById(`resultContent${index}`);
+                    const isVisible = content.style.display !== 'none';
+                    content.style.display = isVisible ? 'none' : 'block';
+                    e.target.textContent = isVisible ? '展開' : '收起';
+                });
+            });
+
+            // 複製單個結果
+            batchResultList.querySelectorAll('.btn-copy-item').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const index = parseInt(e.target.dataset.index);
+                    await navigator.clipboard.writeText(results[index].transcript);
+                    e.target.textContent = '✅ 已複製';
+                    setTimeout(() => { e.target.textContent = '📋 複製'; }, 2000);
+                });
+            });
+        }
 
         function resetUI() {
             stopElapsedTimer();
@@ -333,45 +788,35 @@
             try {
                 await navigator.clipboard.writeText(resultText.value);
                 copyBtn.textContent = '✅ 已複製';
-                setTimeout(() => {
-                    copyBtn.textContent = '📋 複製文字';
-                }, 2000);
+                setTimeout(() => { copyBtn.textContent = '📋 複製文字'; }, 2000);
             } catch (error) {
                 showError('複製失敗');
             }
         });
 
-        // 下載 TXT - 讓用戶選擇儲存位置
+        // 下載單個 TXT
         downloadBtn.addEventListener('click', async () => {
             const content = resultText.value;
             if (!content) return;
 
-            // 嘗試使用 File System Access API（讓用戶選擇儲存位置）
             if ('showSaveFilePicker' in window) {
                 try {
                     const handle = await window.showSaveFilePicker({
                         suggestedName: '轉錄結果.txt',
-                        types: [{
-                            description: 'Text Files',
-                            accept: { 'text/plain': ['.txt'] }
-                        }]
+                        types: [{ description: 'Text Files', accept: { 'text/plain': ['.txt'] } }]
                     });
                     const writable = await handle.createWritable();
                     await writable.write(content);
                     await writable.close();
 
                     downloadBtn.textContent = '✅ 已儲存';
-                    setTimeout(() => {
-                        downloadBtn.textContent = '⬇️ 下載 TXT';
-                    }, 2000);
+                    setTimeout(() => { downloadBtn.textContent = '⬇️ 下載 TXT'; }, 2000);
                     return;
                 } catch (err) {
-                    // 用戶取消或發生錯誤，使用備用方案
                     if (err.name === 'AbortError') return;
                 }
             }
 
-            // 備用方案：提示用戶輸入檔名後下載
             const filename = prompt('請輸入檔案名稱：', '轉錄結果') || '轉錄結果';
             const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
@@ -384,10 +829,62 @@
             URL.revokeObjectURL(url);
         });
 
+        // 下載全部 ZIP
+        downloadAllBtn.addEventListener('click', () => {
+            if (!batchId) return;
+            window.location.href = `/download-batch/${batchId}`;
+        });
+
         function showError(message) {
             errorMessage.textContent = message;
             errorMessage.style.display = 'block';
             progressSection.style.display = 'none';
+            setTimeout(() => {
+                errorMessage.style.display = 'none';
+            }, 5000);
+        }
+
+        function showAutoSaveSuccess(path) {
+            const successMsg = document.createElement('div');
+            successMsg.className = 'auto-save-success';
+            successMsg.innerHTML = `✅ 已自動儲存至：<br>${path}`;
+            document.body.appendChild(successMsg);
+
+            // CSS for toast
+            const style = document.createElement('style');
+            style.textContent = `
+                .auto-save-success {
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    background: var(--bg-card);
+                    color: var(--text-primary);
+                    padding: 1rem 1.5rem;
+                    border-radius: 12px;
+                    border: 1px solid var(--success);
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+                    z-index: 1000;
+                    animation: slideIn 0.3s ease;
+                    font-size: 0.9rem;
+                    line-height: 1.5;
+                }
+                .auto-save-success.fade-out {
+                    animation: fadeOut 0.5s ease forwards;
+                }
+                @keyframes slideIn {
+                    from { transform: translateY(100%); opacity: 0; }
+                    to { transform: translateY(0); opacity: 1; }
+                }
+                @keyframes fadeOut {
+                    to { opacity: 0; transform: translateY(20px); }
+                }
+            `;
+            document.head.appendChild(style);
+
+            setTimeout(() => {
+                successMsg.classList.add('fade-out');
+                setTimeout(() => successMsg.remove(), 500);
+            }, 3000);
         }
 
         function hideError() {
@@ -396,6 +893,7 @@
 
         function hideResult() {
             resultSection.style.display = 'none';
+            batchResultSection.style.display = 'none';
         }
     </script>
 </body>

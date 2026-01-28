@@ -1,2 +1,5 @@
 flask
 openai-whisper
+opencc-python-reimplemented
+Flask
+mlx-whisper

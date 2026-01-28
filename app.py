@@ -1,47 +1,44 @@
 """
 廣東話語音轉文字網頁應用程式
 使用 OpenAI Whisper 進行語音識別
-支援長錄音自動分段轉錄
+支援長錄音自動分段轉錄 + 批量處理
 使用 SSE 實時進度推送
 """
 
 import os
 import uuid
-import subprocess
 import json
 import math
-from flask import Flask, render_template, request, jsonify, send_file, Response
-import whisper
-from opencc import OpenCC
+import subprocess
+import shutil
+import zipfile
+from flask import Flask, render_template, request, jsonify, Response, send_file
+import mlx_whisper
+import opencc
+from datetime import datetime
 
-# 簡繁轉換器 (將簡體轉換為繁體)
-cc = OpenCC('s2t')
+# 導入配置
+from config import *
+
+# 初始化 OpenCC (簡體 -> 繁體)
+cc = opencc.OpenCC('s2t')
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 最大 500MB
+app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
-# 設定上傳和輸出目錄
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
-OUTPUT_FOLDER = os.path.join(os.path.dirname(__file__), 'outputs')
-TEMP_FOLDER = os.path.join(os.path.dirname(__file__), 'temp')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-os.makedirs(TEMP_FOLDER, exist_ok=True)
+# 確保目錄存在
+for folder in [UPLOAD_FOLDER, OUTPUT_FOLDER, TEMP_FOLDER]:
+    if not os.path.exists(folder):
+        os.makedirs(folder)
 
-# 允許的音檔格式
-ALLOWED_EXTENSIONS = {'mp3', 'wav', 'mp4', 'm4a', 'ogg', 'flac', 'webm'}
+print("正在初始化 mlx-whisper...")
+# MLX 不需要顯式預加載模型到顯存，它會在首次使用時自動處理
+print(f"將使用模型: {WHISPER_MODEL}")
 
-# 分段設定
-SEGMENT_DURATION = 5 * 60  # 每段 5 分鐘
-MIN_DURATION_FOR_SPLIT = 10 * 60  # 超過 10 分鐘才分段
 
 # 儲存進度狀態
 transcription_progress = {}
-
-# 載入 Whisper 模型 (首次運行會自動下載)
-print("正在載入 Whisper 模型...")
-model = whisper.load_model("large-v3")
-print("模型載入完成！")
+batch_progress = {}
 
 
 def allowed_file(filename):
@@ -49,21 +46,18 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def get_audio_duration(audio_path):
-    """使用 ffprobe 獲取音檔時長（秒）"""
+def get_audio_duration(file_path):
+    """獲取音檔時長（秒）"""
     try:
-        result = subprocess.run([
-            'ffprobe', '-v', 'quiet', '-print_format', 'json',
-            '-show_format', audio_path
-        ], capture_output=True, text=True)
-        info = json.loads(result.stdout)
-        return float(info['format']['duration'])
+        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file_path]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return float(result.stdout)
     except Exception as e:
-        print(f"獲取音檔時長失敗: {e}")
+        print(f"獲取時長失敗: {e}")
         return 0
 
 
-def split_audio(audio_path, file_id, progress_callback=None):
+def split_audio(audio_path, file_id):
     """將長音檔分割成多個片段"""
     duration = get_audio_duration(audio_path)
     
@@ -79,9 +73,6 @@ def split_audio(audio_path, file_id, progress_callback=None):
     segment_count = math.ceil(duration / SEGMENT_DURATION)
     
     print(f"音檔時長: {duration:.1f} 秒（約 {duration/60:.1f} 分鐘），將分割成 {segment_count} 個片段")
-    
-    if progress_callback:
-        progress_callback('splitting', 0, segment_count, f"正在分割音檔為 {segment_count} 個片段...")
     
     for i in range(segment_count):
         start_time = i * SEGMENT_DURATION
@@ -109,8 +100,6 @@ def split_audio(audio_path, file_id, progress_callback=None):
             if segment_size > 1000:
                 segments.append(segment_path)
                 print(f"分割片段 {i+1}/{segment_count}: {start_time}s - {start_time + actual_duration:.0f}s")
-                if progress_callback:
-                    progress_callback('splitting', i + 1, segment_count, f"已分割 {i+1}/{segment_count} 個片段")
             else:
                 os.remove(segment_path)
     
@@ -127,15 +116,95 @@ def cleanup_segments(segments):
             os.remove(segment)
 
 
+def transcribe_audio(audio_path, file_id):
+    """轉錄單個音檔，返回生成器"""
+    segments = []
+    was_split = False
+    
+    try:
+        # 階段 1: 分割
+        yield {'stage': 'splitting', 'progress': 5, 'message': '正在分析音檔...'}
+        
+        segments, was_split, total_segments = split_audio(audio_path, file_id)
+        
+        yield {'stage': 'splitting', 'progress': 15, 'message': f'已分割為 {total_segments} 個片段', 'total_segments': total_segments}
+        
+        # 階段 2: 轉錄每個片段
+        all_transcripts = []
+        base_progress = 15
+        progress_per_segment = 80 / total_segments
+        
+        for i, segment_path in enumerate(segments):
+            segment_num = i + 1
+            segment_progress = base_progress + (i * progress_per_segment)
+            
+            yield {'stage': 'transcribing', 'progress': int(segment_progress), 'current_segment': segment_num, 'total_segments': total_segments, 'message': f'正在轉錄第 {segment_num}/{total_segments} 個片段...'}
+            
+            try:
+                # 使用 mlx-whisper 進行轉錄
+                # initial_prompt 有助於引導輸出為繁體中文或特定格式
+                result = mlx_whisper.transcribe(
+                    segment_path, 
+                    path_or_hf_repo=WHISPER_MODEL,
+                    language=WHISPER_LANGUAGE,
+                    initial_prompt="以下是廣東話的錄音，請用繁體中文轉錄。"
+                )
+                text = result['text'].strip()
+                if text:
+                    all_transcripts.append(text)
+                
+                completed_progress = base_progress + ((i + 1) * progress_per_segment)
+                yield {'stage': 'transcribing', 'progress': int(completed_progress), 'current_segment': segment_num, 'total_segments': total_segments, 'message': f'第 {segment_num}/{total_segments} 個片段完成！'}
+                
+            except Exception as e:
+                print(f"片段 {segment_num} 轉錄失敗: {e}")
+                yield {'stage': 'transcribing', 'progress': int(segment_progress), 'current_segment': segment_num, 'total_segments': total_segments, 'message': f'片段 {segment_num} 轉錄失敗，繼續下一個...'}
+        
+        # 階段 3: 合併結果並轉換為繁體中文
+        yield {'stage': 'finalizing', 'progress': 95, 'message': '正在合併結果並轉換為繁體中文...'}
+        
+        transcript = '\n\n'.join(all_transcripts) if was_split else (all_transcripts[0] if all_transcripts else '')
+        
+        # 將簡體中文轉換為繁體中文
+        transcript = cc.convert(transcript)
+        
+        # 儲存結果
+        output_path = os.path.join(OUTPUT_FOLDER, f'{file_id}.txt')
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(transcript)
+        
+        # 完成
+        yield {'stage': 'complete', 'progress': 100, 'message': '轉錄完成！', 'transcript': transcript, 'download_id': file_id}
+            
+    except Exception as e:
+        print(f"轉錄錯誤: {e}")
+        yield {'error': str(e)}
+        
+    finally:
+        # 確保清理臨時檔案
+        if was_split and segments:
+            cleanup_segments(segments)
+            
+        # 確保清理上傳的音檔
+        if os.path.exists(audio_path):
+            try:
+                os.remove(audio_path)
+                print(f"已清理原始音檔: {audio_path}")
+            except Exception as e:
+                print(f"清理原始音檔失敗: {e}")
+
+
 @app.route('/')
 def index():
     """首頁"""
     return render_template('index.html')
 
 
+# ==================== 單檔處理 ====================
+
 @app.route('/upload', methods=['POST'])
 def upload():
-    """處理音檔上傳（第一步）"""
+    """處理單檔上傳"""
     if 'audio' not in request.files:
         return jsonify({'error': '未找到音檔'}), 400
     
@@ -163,12 +232,9 @@ def upload():
     transcription_progress[file_id] = {
         'status': 'uploaded',
         'audio_path': audio_path,
+        'original_name': file.filename,
         'duration': duration,
-        'segment_count': segment_count,
-        'current_segment': 0,
-        'message': '檔案已上傳',
-        'transcript': '',
-        'error': None
+        'segment_count': segment_count
     }
     
     return jsonify({
@@ -181,7 +247,7 @@ def upload():
 
 @app.route('/transcribe/<file_id>')
 def transcribe_stream(file_id):
-    """SSE 串流轉錄"""
+    """SSE 串流轉錄（單檔）"""
     def generate():
         if file_id not in transcription_progress:
             yield f"data: {json.dumps({'error': '找不到檔案'})}\n\n"
@@ -190,69 +256,114 @@ def transcribe_stream(file_id):
         progress = transcription_progress[file_id]
         audio_path = progress['audio_path']
         
-        try:
-            # 階段 1: 分割
-            yield f"data: {json.dumps({'stage': 'splitting', 'progress': 5, 'message': '正在分析音檔...'})}\n\n"
+        for update in transcribe_audio(audio_path, file_id):
+            yield f"data: {json.dumps(update)}\n\n"
+        
+        # 清理進度狀態
+        if file_id in transcription_progress:
+            del transcription_progress[file_id]
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+    })
+
+
+# ==================== 批量處理 ====================
+
+@app.route('/upload-batch', methods=['POST'])
+def upload_batch():
+    """處理批量上傳"""
+    if 'audio' not in request.files:
+        return jsonify({'error': '未找到音檔'}), 400
+    
+    files = request.files.getlist('audio')
+    
+    if len(files) == 0:
+        return jsonify({'error': '未選擇檔案'}), 400
+    
+    if len(files) > MAX_BATCH_FILES:
+        return jsonify({'error': f'最多只能上傳 {MAX_BATCH_FILES} 個檔案'}), 400
+    
+    batch_id = str(uuid.uuid4())
+    file_infos = []
+    
+    for file in files:
+        if file.filename == '' or not allowed_file(file.filename):
+            continue
+        
+        file_id = str(uuid.uuid4())
+        original_ext = file.filename.rsplit('.', 1)[1].lower()
+        audio_path = os.path.join(UPLOAD_FOLDER, f'{file_id}.{original_ext}')
+        
+        file.save(audio_path)
+        duration = get_audio_duration(audio_path)
+        
+        file_infos.append({
+            'file_id': file_id,
+            'original_name': file.filename,
+            'audio_path': audio_path,
+            'duration': duration,
+            'status': 'pending'
+        })
+    
+    if len(file_infos) == 0:
+        return jsonify({'error': '沒有有效的音檔'}), 400
+    
+    batch_progress[batch_id] = {
+        'files': file_infos,
+        'total': len(file_infos),
+        'completed': 0,
+        'status': 'uploaded'
+    }
+    
+    return jsonify({
+        'success': True,
+        'batch_id': batch_id,
+        'files': [{'file_id': f['file_id'], 'name': f['original_name'], 'duration': f['duration']} for f in file_infos],
+        'total': len(file_infos)
+    })
+
+
+@app.route('/transcribe-batch/<batch_id>')
+def transcribe_batch_stream(batch_id):
+    """SSE 串流轉錄（批量）"""
+    def generate():
+        if batch_id not in batch_progress:
+            yield f"data: {json.dumps({'error': '找不到批次'})}\n\n"
+            return
+        
+        batch = batch_progress[batch_id]
+        total_files = batch['total']
+        
+        for file_index, file_info in enumerate(batch['files']):
+            file_id = file_info['file_id']
+            file_name = file_info['original_name']
+            audio_path = file_info['audio_path']
             
-            segments, was_split, total_segments = split_audio(audio_path, file_id)
+            # 發送開始處理訊息
+            yield f"data: {json.dumps({'stage': 'file_start', 'file_index': file_index, 'file_name': file_name, 'total_files': total_files, 'message': f'開始處理 {file_name} ({file_index + 1}/{total_files})'})}\n\n"
             
-            yield f"data: {json.dumps({'stage': 'splitting', 'progress': 15, 'message': f'已分割為 {total_segments} 個片段', 'total_segments': total_segments})}\n\n"
+            # 轉錄這個檔案
+            for update in transcribe_audio(audio_path, file_id):
+                update['file_index'] = file_index
+                update['file_name'] = file_name
+                update['total_files'] = total_files
+                update['batch_progress'] = int((file_index / total_files) * 100 + (update.get('progress', 0) / total_files))
+                yield f"data: {json.dumps(update)}\n\n"
             
-            # 階段 2: 轉錄每個片段
-            all_transcripts = []
-            base_progress = 15
-            progress_per_segment = 80 / total_segments
+            file_info['status'] = 'completed'
+            batch['completed'] += 1
             
-            for i, segment_path in enumerate(segments):
-                segment_num = i + 1
-                segment_progress = base_progress + (i * progress_per_segment)
-                
-                yield f"data: {json.dumps({'stage': 'transcribing', 'progress': int(segment_progress), 'current_segment': segment_num, 'total_segments': total_segments, 'message': f'正在轉錄第 {segment_num}/{total_segments} 個片段...'})}\n\n"
-                
-                try:
-                    result = model.transcribe(segment_path, language="yue")
-                    text = result['text'].strip()
-                    if text:
-                        all_transcripts.append(text)
-                    
-                    completed_progress = base_progress + ((i + 1) * progress_per_segment)
-                    yield f"data: {json.dumps({'stage': 'transcribing', 'progress': int(completed_progress), 'current_segment': segment_num, 'total_segments': total_segments, 'message': f'第 {segment_num}/{total_segments} 個片段完成！'})}\n\n"
-                    
-                except Exception as e:
-                    print(f"片段 {segment_num} 轉錄失敗: {e}")
-                    yield f"data: {json.dumps({'stage': 'transcribing', 'progress': int(segment_progress), 'current_segment': segment_num, 'total_segments': total_segments, 'message': f'片段 {segment_num} 轉錄失敗，繼續下一個...'})}\n\n"
-            
-            # 階段 3: 合併結果並轉換為繁體中文
-            yield f"data: {json.dumps({'stage': 'finalizing', 'progress': 95, 'message': '正在合併結果並轉換為繁體中文...'})}\n\n"
-            
-            transcript = '\n\n'.join(all_transcripts) if was_split else (all_transcripts[0] if all_transcripts else '')
-            
-            # 將簡體中文轉換為繁體中文
-            transcript = cc.convert(transcript)
-            
-            # 清理臨時檔案
-            if was_split:
-                cleanup_segments(segments)
-            
-            # 儲存結果
-            output_path = os.path.join(OUTPUT_FOLDER, f'{file_id}.txt')
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(transcript)
-            
-            # 清理上傳的音檔
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-            
-            # 完成
-            yield f"data: {json.dumps({'stage': 'complete', 'progress': 100, 'message': '轉錄完成！', 'transcript': transcript, 'download_id': file_id})}\n\n"
-            
-            # 清理進度狀態
-            if file_id in transcription_progress:
-                del transcription_progress[file_id]
-                
-        except Exception as e:
-            print(f"轉錄錯誤: {e}")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            # 發送檔案完成訊息
+            completed_count = batch['completed']
+            complete_msg = f'{file_name} 完成！({completed_count}/{total_files})'
+            yield f"data: {json.dumps({'stage': 'file_complete', 'file_index': file_index, 'file_name': file_name, 'total_files': total_files, 'completed': completed_count, 'message': complete_msg})}\n\n"
+        
+        # 全部完成
+        batch_complete_msg = f'批量轉錄完成！共 {total_files} 個檔案'
+        yield f"data: {json.dumps({'stage': 'batch_complete', 'batch_id': batch_id, 'total_files': total_files, 'message': batch_complete_msg})}\n\n"
     
     return Response(generate(), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache',
@@ -263,7 +374,7 @@ def transcribe_stream(file_id):
 
 @app.route('/download/<file_id>')
 def download(file_id):
-    """下載轉錄結果"""
+    """下載單個轉錄結果"""
     output_path = os.path.join(OUTPUT_FOLDER, f'{file_id}.txt')
     
     if not os.path.exists(output_path):
@@ -277,9 +388,132 @@ def download(file_id):
     )
 
 
+@app.route('/download-batch/<batch_id>')
+def download_batch(batch_id):
+    """下載批量轉錄結果（ZIP）"""
+    if batch_id not in batch_progress:
+        return jsonify({'error': '找不到批次'}), 404
+    
+    batch = batch_progress[batch_id]
+    
+    # 創建 ZIP 檔案
+    zip_path = os.path.join(OUTPUT_FOLDER, f'{batch_id}.zip')
+    
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for file_info in batch['files']:
+            file_id = file_info['file_id']
+            original_name = file_info['original_name']
+            txt_path = os.path.join(OUTPUT_FOLDER, f'{file_id}.txt')
+            
+            if os.path.exists(txt_path):
+                # 使用原始檔名（改為 .txt）
+                txt_name = os.path.splitext(original_name)[0] + '.txt'
+                zipf.write(txt_path, txt_name)
+    
+    return send_file(
+        zip_path,
+        as_attachment=True,
+        download_name='transcripts.zip',
+        mimetype='application/zip'
+    )
+
+
+@app.route('/auto-save', methods=['POST'])
+def auto_save():
+    """自動儲存轉錄結果到指定路徑"""
+    data = request.get_json()
+    
+    save_path = data.get('save_path', '')
+    file_id = data.get('file_id', '')
+    original_name = data.get('original_name', '')
+    transcript = data.get('transcript', '')
+    
+    if not save_path or not original_name or not transcript:
+        return jsonify({'error': '缺少必要參數'}), 400
+    
+    # 驗證路徑是否存在
+    if not os.path.isdir(save_path):
+        return jsonify({'error': f'路徑不存在: {save_path}'}), 400
+    
+    # 生成輸出檔名（使用原始檔名，改為 .txt）
+    txt_name = os.path.splitext(original_name)[0] + '.txt'
+    output_path = os.path.join(save_path, txt_name)
+    
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(transcript)
+        
+        return jsonify({
+            'success': True,
+            'saved_path': output_path,
+            'file_name': txt_name
+        })
+    except Exception as e:
+        return jsonify({'error': f'儲存失敗: {str(e)}'}), 500
+
+
+@app.route('/auto-save-batch', methods=['POST'])
+def auto_save_batch():
+    """批量自動儲存轉錄結果到指定路徑"""
+    data = request.get_json()
+    
+    save_path = data.get('save_path', '')
+    files = data.get('files', [])
+    
+    if not save_path or not files:
+        return jsonify({'error': '缺少必要參數'}), 400
+    
+    if not os.path.isdir(save_path):
+        return jsonify({'error': f'路徑不存在: {save_path}'}), 400
+    
+    saved_files = []
+    errors = []
+    
+    for file_info in files:
+        original_name = file_info.get('name', '')
+        transcript = file_info.get('transcript', '')
+        
+        if not original_name or not transcript:
+            continue
+        
+        txt_name = os.path.splitext(original_name)[0] + '.txt'
+        output_path = os.path.join(save_path, txt_name)
+        
+        try:
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(transcript)
+            saved_files.append(txt_name)
+        except Exception as e:
+            errors.append(f'{txt_name}: {str(e)}')
+    
+    return jsonify({
+        'success': True,
+        'saved_count': len(saved_files),
+        'saved_files': saved_files,
+        'errors': errors
+    })
+
+
+@app.route('/select-folder', methods=['POST'])
+def select_folder():
+    """打開系統原生資料夾選擇視窗 (macOS Only)"""
+    try:
+        # 使用 AppleScript 彈出資料夾選擇視窗
+        cmd = """osascript -e 'POSIX path of (choose folder with prompt "請選擇儲存位置")'"""
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            path = result.stdout.strip()
+            return jsonify({'success': True, 'path': path})
+        else:
+            # 用戶取消
+            return jsonify({'success': False, 'message': 'User cancelled'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 if __name__ == '__main__':
     print("\n" + "=" * 50)
     print("廣東話語音轉文字應用程式")
-    print("開啟瀏覽器訪問: http://localhost:5001")
+    print(f"開啟瀏覽器訪問: http://localhost:{PORT}")
     print("=" * 50 + "\n")
-    app.run(debug=True, host='0.0.0.0', port=5001, threaded=True)
+    app.run(debug=DEBUG, host=HOST, port=PORT, threaded=True)

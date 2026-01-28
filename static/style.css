@@ -1,4 +1,4 @@
-/* 廣東話語音轉文字應用程式樣式 */
+/* 廣東話語音轉文字應用程式樣式 - 優化版 */
 
 :root {
     --bg-primary: #0f0f1a;
@@ -12,7 +12,10 @@
     --text-muted: #71717a;
     --success: #22c55e;
     --error: #ef4444;
+    --warning: #f59e0b;
     --border: #3f3f5a;
+    --gradient-1: linear-gradient(135deg, #7c3aed 0%, #ec4899 100%);
+    --gradient-2: linear-gradient(90deg, #7c3aed, #9333ea, #ec4899);
 }
 
 * {
@@ -30,7 +33,7 @@ body {
 }
 
 .container {
-    max-width: 700px;
+    max-width: 800px;
     margin: 0 auto;
     padding: 2rem 1.5rem;
     min-height: 100vh;
@@ -41,11 +44,11 @@ body {
 /* Header */
 header {
     text-align: center;
-    margin-bottom: 2.5rem;
+    margin-bottom: 2rem;
 }
 
 h1 {
-    font-size: 2rem;
+    font-size: 2.25rem;
     font-weight: 700;
     margin-bottom: 0.5rem;
     background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
@@ -64,6 +67,48 @@ main {
     flex: 1;
 }
 
+/* 模式切換 */
+.mode-toggle {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    background: var(--bg-card);
+    padding: 0.5rem;
+    border-radius: 12px;
+}
+
+.mode-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.mode-btn:hover {
+    color: var(--text-primary);
+    background: rgba(124, 58, 237, 0.1);
+}
+
+.mode-btn.active {
+    color: white;
+    background: var(--gradient-1);
+    box-shadow: 0 4px 15px var(--accent-glow);
+}
+
+.mode-icon {
+    font-size: 1.1rem;
+}
+
 /* Upload zone */
 .upload-zone {
     background: var(--bg-card);
@@ -73,31 +118,56 @@ main {
     text-align: center;
     cursor: pointer;
     transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.upload-zone::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--gradient-1);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.upload-zone:hover::before,
+.upload-zone.dragover::before {
+    opacity: 0.1;
 }
 
 .upload-zone:hover,
 .upload-zone.dragover {
     border-color: var(--accent);
-    background: rgba(124, 58, 237, 0.1);
     box-shadow: 0 0 30px var(--accent-glow);
+    transform: translateY(-2px);
 }
 
 .upload-icon {
-    font-size: 3rem;
+    font-size: 3.5rem;
     margin-bottom: 1rem;
+    position: relative;
+    z-index: 1;
 }
 
 .upload-text {
     font-size: 1.1rem;
     margin-bottom: 0.5rem;
+    position: relative;
+    z-index: 1;
 }
 
 .upload-hint {
     color: var(--text-muted);
     font-size: 0.875rem;
+    position: relative;
+    z-index: 1;
 }
 
-/* File info */
+/* File info (single) */
 .file-info {
     display: flex;
     align-items: center;
@@ -106,6 +176,7 @@ main {
     border-radius: 12px;
     padding: 1rem 1.5rem;
     margin-bottom: 1rem;
+    border: 1px solid var(--border);
 }
 
 .file-name {
@@ -121,23 +192,120 @@ main {
     cursor: pointer;
     font-size: 1.2rem;
     padding: 0.25rem 0.5rem;
-    transition: color 0.2s;
+    transition: all 0.2s;
+    border-radius: 6px;
 }
 
 .btn-clear:hover {
+    color: var(--error);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+/* File queue (batch) */
+.file-queue {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    border: 1px solid var(--border);
+}
+
+.queue-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.queue-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.queue-header h3 span {
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.btn-clear-all {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-clear-all:hover {
+    border-color: var(--error);
+    color: var(--error);
+}
+
+.queue-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.queue-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+}
+
+.queue-item:last-child {
+    margin-bottom: 0;
+}
+
+.queue-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.queue-item-name {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.queue-item-size {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.queue-item-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0.25rem 0.5rem;
+    transition: color 0.2s;
+}
+
+.queue-item-remove:hover {
     color: var(--error);
 }
 
 /* Transcribe button */
 .btn-transcribe {
     width: 100%;
-    padding: 1rem 2rem;
+    padding: 1.1rem 2rem;
     font-size: 1.1rem;
     font-weight: 600;
     color: white;
-    background: linear-gradient(135deg, var(--accent) 0%, #9333ea 100%);
+    background: var(--gradient-1);
     border: none;
-    border-radius: 12px;
+    border-radius: 14px;
     cursor: pointer;
     transition: all 0.3s ease;
     margin-top: 1rem;
@@ -145,11 +313,32 @@ main {
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-transcribe::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.5s ease;
+}
+
+.btn-transcribe:hover:not(:disabled)::before {
+    left: 100%;
 }
 
 .btn-transcribe:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 25px var(--accent-glow);
+    transform: translateY(-3px);
+    box-shadow: 0 10px 30px var(--accent-glow);
+}
+
+.btn-transcribe:active:not(:disabled) {
+    transform: translateY(-1px);
 }
 
 .btn-transcribe:disabled {
@@ -178,13 +367,69 @@ main {
     }
 }
 
-/* Progress section - 進度顯示區域 */
+/* Progress section */
 .progress-section {
     background: var(--bg-card);
     border-radius: 16px;
     padding: 2rem;
     margin-top: 1.5rem;
     animation: fadeIn 0.3s ease;
+    border: 1px solid var(--border);
+}
+
+/* Batch progress */
+.batch-progress {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.batch-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.batch-header span {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+#batchCount {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.batch-bar-container {
+    width: 100%;
+    height: 8px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.batch-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--success);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.current-file {
+    text-align: center;
+    padding: 0.5rem 1rem;
+    margin-bottom: 1rem;
+    background: rgba(124, 58, 237, 0.1);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.current-file span {
+    color: var(--accent-hover);
+    font-weight: 500;
 }
 
 .progress-header {
@@ -237,7 +482,6 @@ main {
     color: var(--accent-hover);
 }
 
-
 .progress-bar-container {
     width: 100%;
     height: 12px;
@@ -245,16 +489,29 @@ main {
     border-radius: 6px;
     overflow: hidden;
     margin-bottom: 0.75rem;
+    position: relative;
 }
 
 .progress-bar {
     height: 100%;
     width: 0%;
-    background: linear-gradient(90deg, var(--accent), #9333ea, #ec4899);
+    background: var(--gradient-2);
     background-size: 200% 100%;
     border-radius: 6px;
     transition: width 0.3s ease;
     animation: gradientMove 2s linear infinite;
+    position: relative;
+}
+
+.progress-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    animation: shimmer 1.5s infinite;
 }
 
 @keyframes gradientMove {
@@ -264,6 +521,16 @@ main {
 
     100% {
         background-position: 200% 50%;
+    }
+}
+
+@keyframes shimmer {
+    0% {
+        transform: translateX(-100%);
+    }
+
+    100% {
+        transform: translateX(100%);
     }
 }
 
@@ -315,7 +582,8 @@ main {
 }
 
 /* Result section */
-.result-section {
+.result-section,
+.batch-result-section {
     margin-top: 2rem;
     animation: fadeIn 0.5s ease;
 }
@@ -332,7 +600,8 @@ main {
     }
 }
 
-.result-section h2 {
+.result-section h2,
+.batch-result-section h2 {
     font-size: 1.25rem;
     margin-bottom: 1rem;
 }
@@ -341,6 +610,7 @@ main {
     background: var(--bg-card);
     border-radius: 12px;
     overflow: hidden;
+    border: 1px solid var(--border);
 }
 
 #resultText {
@@ -360,6 +630,105 @@ main {
     outline: none;
 }
 
+/* Batch result */
+.batch-result-summary {
+    margin-bottom: 1rem;
+}
+
+.result-count {
+    font-size: 1rem;
+    color: var(--success);
+    font-weight: 500;
+}
+
+.batch-result-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.batch-result-item {
+    background: var(--bg-card);
+    border-radius: 12px;
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.result-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+}
+
+.result-item-name {
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.btn-expand {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-expand:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.result-item-content {
+    border-top: 1px solid var(--border);
+    padding: 1rem 1.25rem;
+    background: var(--bg-secondary);
+}
+
+.result-item-content textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.result-item-content textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.result-item-actions {
+    margin-top: 0.75rem;
+    text-align: right;
+}
+
+.btn-copy-item {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-copy-item:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
 .result-actions {
     display: flex;
     gap: 1rem;
@@ -367,7 +736,8 @@ main {
 }
 
 .btn-copy,
-.btn-download {
+.btn-download,
+.btn-download-all {
     flex: 1;
     padding: 0.875rem 1.5rem;
     font-size: 1rem;
@@ -388,14 +758,17 @@ main {
     border-color: var(--accent);
 }
 
-.btn-download {
+.btn-download,
+.btn-download-all {
     background: var(--success);
     border: none;
     color: white;
 }
 
-.btn-download:hover {
+.btn-download:hover,
+.btn-download-all:hover {
     filter: brightness(1.1);
+    transform: translateY(-1px);
 }
 
 /* Error message */
@@ -424,14 +797,177 @@ footer {
     }
 
     h1 {
-        font-size: 1.5rem;
+        font-size: 1.75rem;
     }
 
     .upload-zone {
         padding: 2rem 1.5rem;
     }
 
+    .mode-toggle {
+        flex-direction: column;
+    }
+
     .result-actions {
         flex-direction: column;
     }
+
+    .queue-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+
+    .queue-item-remove {
+        align-self: flex-end;
+    }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* 自動儲存設定樣式 */
+.save-settings {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+}
+
+.save-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+}
+
+.toggle-container {
+    position: relative;
+    width: 44px;
+    height: 24px;
+}
+
+.toggle-container input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--border);
+    transition: .4s;
+    border-radius: 24px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked+.toggle-slider {
+    background-color: var(--success);
+}
+
+input:checked+.toggle-slider:before {
+    transform: translateX(20px);
+}
+
+.toggle-label {
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.save-path-input {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    animation: fadeIn 0.3s ease;
+}
+
+.save-path-input label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.save-path-input input {
+    width: 100%;
+    padding: 0.75rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    transition: border-color 0.3s;
+}
+
+.save-path-input input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.save-hint {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.input-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.btn-browse {
+    white-space: nowrap;
+    padding: 0 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-browse:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.btn-browse:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
