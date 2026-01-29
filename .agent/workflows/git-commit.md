@@ -22,22 +22,15 @@ description: Git commit and push - 快速提交和推送代碼到 GitHub
    ```bash
    git diff --stat
    ```
-   ```
    顯示更改的檔案摘要。
 
-3. **下載更新 (Pull)**
-   在提交之前，先拉取遠端更新以避免衝突：
-   ```bash
-   git pull
-   ```
-
-4. **添加所有更改**
+3. **添加所有更改**
    // turbo
    ```bash
    git add -A
    ```
 
-5. **提交更改**
+4. **提交更改**
    根據更改內容，生成有意義的 commit 訊息：
    - 使用繁體中文或英文（根據用戶偏好）
    - 遵循 Conventional Commits 格式：
@@ -52,7 +45,7 @@ description: Git commit and push - 快速提交和推送代碼到 GitHub
    git commit -m "類型: 訊息描述"
    ```
 
-6. **推送到遠端**
+5. **推送到遠端**
    // turbo
    ```bash
    git push

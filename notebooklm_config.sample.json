@@ -1,0 +1,14 @@
+{
+    "mcpServers": {
+        "notebooklm": {
+            "command": "uvx",
+            "args": [
+                "notebooklm-mcp-server"
+            ],
+            "env": {
+                "NOTEBOOKLM_SESSION_ID": "<YOUR_SESSION_ID_HERE>",
+                "NOTEBOOKLM_Shared_Secret": "<YOUR_SHARED_SECRET_IF_ANY>"
+            }
+        }
+    }
+}
